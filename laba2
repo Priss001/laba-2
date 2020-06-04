@@ -1,0 +1,190 @@
+#include <windows.h>
+#include <conio.h>
+#include <iostream>
+#include <vector>
+#include <process.h>
+#include <String.h>
+#include <string>
+
+#define MAX_COUNT 10
+
+using namespace std;
+
+PROCESS_INFORMATION CreateNewProcess(char* path, char *commandline);
+void InitialProcess(char *path); 
+void printString(int ProccessNumber);
+
+char String[10][30] = {
+{"\n \r 1) First process PID = "},
+{"\n \r 2) Second process PID = "}, 
+{"\n \r 3) Third process PID = "},
+{"\n \r 4) Fourth process PID = "},
+{"\n \r 5) Fifth process PID = "},
+{"\n \r 6) Sixth process PID = "}, 
+{"\n \r 7) Seventh process PID = "},
+{"\n \r 8) Eighth process PID = "},
+{"\n \r 9) Ninth process PID = "}, 
+{"\n \r 10) Tenth process PID = "}
+};
+int getch_noblock() 
+{
+    if (_kbhit())			// если клавиша не нажата
+        return _getch();
+    else
+        return -1;
+}
+
+
+void main(int argc, char* argv[])
+{
+    if(argc == 2) { printString(atoi(argv[1])); } // Если дочерний процесс
+    else InitialProcess(argv[0]);						// Если родительский процесс
+}
+
+void InitialProcess(char *path)
+{
+	char ch = 0;
+	int currentNum = 0;
+	bool flag = false;
+																	
+	vector<HANDLE> closeEvents;
+	vector<HANDLE> CanPrintEvents;
+	char EventID[30];
+
+	PROCESS_INFORMATION procInf[MAX_COUNT];
+
+	while(1)
+	{
+		Sleep(1);
+		ch = getch_noblock();
+		switch(ch)
+		{			
+		case '+':
+			{
+				if(closeEvents.size() < MAX_COUNT)
+				{					
+					sprintf(EventID," %d", closeEvents.size()+1);
+					closeEvents.push_back(CreateEvent(NULL ,FALSE, FALSE, EventID )); // нач. состояние - несигнальное, автосброс
+
+					sprintf(EventID," %dp", CanPrintEvents.size()+1);
+					CanPrintEvents.push_back(CreateEvent(NULL ,TRUE, FALSE, EventID )); // Ручной сброс
+
+					procInf[closeEvents.size()-1] = CreateNewProcess( path, EventID );
+				}	
+				break;
+			}
+
+		case '-':
+			{
+				if(closeEvents.size() > 0)
+				{ 
+					SetEvent(closeEvents.back()); 
+					WaitForSingleObject(procInf[closeEvents.size()-1].hProcess,INFINITE); // Ожидаем завершения последнего процесса
+
+					if(!CloseHandle(closeEvents.back()))
+						printf( "Close Handle failed (%d)\n", GetLastError());
+					if(!CloseHandle(CanPrintEvents.back()))
+						printf( "Close Handle failed (%d)\n", GetLastError());
+
+					closeEvents.pop_back();
+					CanPrintEvents.pop_back();
+					if (currentNum >= closeEvents.size()) 
+					{
+						currentNum = 0;
+						flag = true;
+					}
+				}
+				break;
+			}
+		case 'q':
+			{
+				if(closeEvents.size() > 0)
+				{							
+					while(closeEvents.size() > 0)
+					{							
+						SetEvent(closeEvents.back()); 
+						WaitForSingleObject(procInf[closeEvents.size()-1].hProcess,INFINITE); // Ожидаем завершения последнего процесса
+
+						if(!CloseHandle(closeEvents.back()) || !CloseHandle(CanPrintEvents.back()) || !CloseHandle(procInf[closeEvents.size()-1].hProcess)
+							|| !CloseHandle(procInf[closeEvents.size()-1].hThread))
+							printf( "Close Handle failed (%d)\n", GetLastError());
+
+						closeEvents.pop_back();
+						CanPrintEvents.pop_back();
+					}	
+					currentNum = 0;
+				}
+				printf("\n\n");
+				system("pause");
+				return;
+			}
+
+		}
+		if(CanPrintEvents.size() > 0 && WaitForSingleObject(CanPrintEvents[currentNum],0) == WAIT_TIMEOUT ) // Пока событие печати последнего процесса 
+																											// не будет сброшено
+		{
+			if(currentNum >= CanPrintEvents.size()-1 ) currentNum = 0;
+			else if(!flag) currentNum++;
+			flag = false;
+
+			SetEvent(CanPrintEvents[currentNum]);
+		}
+	}	
+}
+
+PROCESS_INFORMATION CreateNewProcess(char* path, char *commandline)
+{
+	STARTUPINFO si;
+	ZeroMemory( &si, sizeof(si) );
+	si.cb = sizeof(si);
+	PROCESS_INFORMATION infProc;
+	ZeroMemory( &infProc, sizeof(infProc) );
+	if(!CreateProcess(path, commandline, NULL, NULL, FALSE, NULL, NULL, NULL, &si, &infProc)) 
+		printf( "Create Process failed (%d)\n", GetLastError());
+	return infProc;
+}
+
+void printString(int processNumber)
+{
+	char EventID[30];
+	sprintf(EventID," %d", processNumber);
+	HANDLE closeEvent = OpenEvent(EVENT_ALL_ACCESS,FALSE,EventID);
+
+	sprintf(EventID," %dp", processNumber);
+	HANDLE CanPrintEvent = OpenEvent(EVENT_ALL_ACCESS,FALSE,EventID);
+
+	char *PID = new char[];
+	sprintf(PID, "%d", getpid());
+
+	while(1)
+	{
+		//Sleep(1);
+		if(WaitForSingleObject(CanPrintEvent, 1) == WAIT_OBJECT_0) 
+		{ 			
+			for(int i=0; i<strlen(String[processNumber-1]); i++)        // Печать строки
+			{
+				if(WaitForSingleObject(closeEvent, 0) == WAIT_OBJECT_0)  // Если установлено событие закрытия данного процесса	
+				{
+					CloseHandle(closeEvent); CloseHandle(CanPrintEvent); 
+					return;
+				}				
+				cout << String[processNumber-1][i];
+				Sleep(70);
+			}
+			for(int i = 0; i < strlen(PID); i++)
+			{
+				cout << PID[i];
+				Sleep(70);
+			}
+			cout << endl;
+			ResetEvent(CanPrintEvent);
+		}
+
+		if(WaitForSingleObject(closeEvent, 0) == WAIT_OBJECT_0)
+		{
+			CloseHandle(closeEvent); CloseHandle(CanPrintEvent); 
+			return;
+		}
+	}
+	return;
+}
